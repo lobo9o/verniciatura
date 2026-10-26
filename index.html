@@ -118,7 +118,7 @@ const BUCKET = "produzione", FILE_DATI = "verniciatura.json.gz", FILE_EXCEL = "V
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = id => document.getElementById(id);
 const ROW = 26;
-let dati = null, righe = [], visibili = [], colonne = [], ix = {};
+let dati = null, righe = [], visibili = [], colonne = [], ix = {}, filtroAttivo = false;
 
 function email(u) { u = u.trim(); return u.includes("@") ? u : u.toLowerCase() + "@" + DOMINIO; }
 
@@ -155,7 +155,7 @@ function prepara() {
   colonne.forEach((c, i) => ix[c.n] = i);
   let padre = null;
   righe = dati.righe.map(r => {
-    const riga = { p: !!r.p, l: r.l, k: r.k || "", b: r.b || null, v: r.v };
+    const riga = { p: !!r.p, l: r.l, c: r.c || "", k: r.k || "", b: r.b || null, v: r.v };
     if (riga.p) padre = riga;
     riga.h = riga.p ? riga : padre;
     riga.testo = r.v.join(" ").toLowerCase();
@@ -219,6 +219,8 @@ function filtra(inCima = true) {
   $("conta").textContent = `Distinte: ${padri.toLocaleString("it-IT")}  ·  righe: ${visibili.length.toLocaleString("it-IT")}` +
     (sel.length || trova ? "  (filtro attivo)" : "");
   $("vuoto").style.display = visibili.length ? "none" : "block";
+  filtroAttivo = sel.length > 0 || !!trova;
+  if (!$("excel").disabled) $("excel").textContent = filtroAttivo ? "Scarica Excel (righe filtrate)" : "Scarica Excel";
   $("tabella").style.height = visibili.length * ROW + "px";
   if (inCima) $("scroll").scrollTop = 0;
   disegna();
@@ -252,20 +254,73 @@ function disegna() {
 
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
+// Senza filtri: il file Excel fatto dal programma (tutto il foglio). Con un filtro: un Excel uguale ma solo con le righe che si vedono.
 async function scaricaExcel() {
   const b = $("excel");
   b.disabled = true; b.textContent = "Scarico...";
   try {
-    const blob = await scarica(FILE_EXCEL);
     const d = dati ? new Date(dati.aggiornato) : new Date();
-    const nome = `Verniciatura ${d.toISOString().slice(0, 10)}.xlsx`;
+    const giorno = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    let blob, nome;
+    if (filtroAttivo && dati) {
+      if (!visibili.length) { alert("Nessuna riga con questi filtri."); return; }
+      blob = await excelFiltrato();
+      nome = `Verniciatura ${$("fLista").value || "filtrato"} ${giorno}.xlsx`;
+    } else {
+      blob = await scarica(FILE_EXCEL);
+      nome = `Verniciatura ${giorno}.xlsx`;
+    }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = nome;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   } catch (e) { alert(e.message); }
-  finally { b.disabled = false; b.textContent = "Scarica Excel"; }
+  finally { b.disabled = false; b.textContent = filtroAttivo ? "Scarica Excel (righe filtrate)" : "Scarica Excel"; }
+}
+
+function caricaScript(src) {
+  return new Promise((ok, ko) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = () => ko(new Error("Non riesco a caricare il generatore Excel: controlla la connessione."));
+    document.head.appendChild(s);
+  });
+}
+
+// Testo come si vede → numero o data per Excel (come nel file del programma)
+function valoreExcel(t, col) {
+  if (t === "") return null;
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t);
+  if (m) return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+  if (col.d) { const n = Number(t.replace(/\./g, "").replace(",", ".")); if (Number.isFinite(n)) return n; }
+  return t;
+}
+
+// Stesso formato del file del programma: colonne del foglio + Tipo + Chiave, stessi colori
+async function excelFiltrato() {
+  if (!window.ExcelJS) await caricaScript("https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js");
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Verniciatura", { views: [{ state: "frozen", ySplit: 1 }] });
+  ws.columns = [...colonne.map(c => ({ header: c.n, width: Math.min(45, Math.max(5, c.w / 6.5)) })),
+    { header: "Tipo", width: 12 }, { header: "Chiave", width: 14 }];
+  const nc = colonne.length + 2;
+  const h = ws.getRow(1);
+  h.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  for (let c = 1; c <= nc; c++) h.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF37474F" } };
+  const sfondi = { p: "FF96BEF0", mr: "FFC8EEC8", mp: "FFFFDEAA", mv: "FFFFCDCD" };
+  for (const r of visibili) {
+    const row = ws.addRow([...r.v.map((t, i) => valoreExcel(t, colonne[i])), r.p ? "Padre" : "Componente", r.c]);
+    row.eachCell((cell, n) => {
+      if (cell.value instanceof Date) cell.numFmt = "dd/mm/yyyy";
+      else if (typeof cell.value === "number") cell.numFmt = "#,##0.##";
+    });
+    const s = sfondi[r.p ? "p" : r.k];
+    if (s) for (let c = 1; c <= nc; c++) row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: s } };
+    if (r.p) row.font = { bold: true };
+  }
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: nc } };
+  const buf = await wb.xlsx.writeBuffer();
+  return new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
 function mostraApp() {
