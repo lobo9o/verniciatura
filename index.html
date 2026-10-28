@@ -42,8 +42,26 @@
   .spazio { flex: 1; }
   .filtri { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; background: var(--card); border-bottom: 1px solid var(--line); }
   .filtri input[type=search] { width: 230px; max-width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
-  .filtri select { padding: 6px 4px; border: 1px solid var(--line); border-radius: 6px; max-width: 170px; background: #fff; }
-  .filtri select.attivo, .filtri input.attivo { background: #ffe282; }
+  .filtri input#cercaCodice { width: 150px; }
+  .filtri input.attivo { background: #ffe282; }
+  #attivi { color: var(--muted); }
+  #attivi b { color: var(--ink); }
+  #intestazione > div { cursor: pointer; user-select: none; }
+  #intestazione > div:hover { background: #455a64; }
+  #intestazione > div.filtrata { background: #c79100; }
+  #intestazione > div::after { content: " ▾"; opacity: .6; font-size: 11px; }
+  /* Filtro di una colonna: elenco dei valori con le caselle, come nel programma */
+  #popup { position: fixed; z-index: 10; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+    width: 280px; max-width: calc(100vw - 32px); display: none; flex-direction: column; max-height: min(460px, calc(100vh - 32px)); }
+  #popup h2 { font-size: 14px; margin: 0; padding: 10px 12px 6px; }
+  #popup input[type=search] { margin: 0 12px 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  #popup .tutti { padding: 2px 12px 6px; display: flex; gap: 12px; }
+  #popup .tutti a { color: var(--blu); cursor: pointer; font-weight: 600; }
+  #popupLista { overflow: auto; flex: 1; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px 0; }
+  #popupLista label { display: flex; align-items: center; gap: 7px; padding: 3px 12px; cursor: pointer; white-space: nowrap; }
+  #popupLista label:hover { background: #f1f4f6; }
+  #popup .azioni { display: flex; gap: 8px; justify-content: flex-end; padding: 8px 12px; }
+  .imb { font-weight: 700; margin-right: 5px; }
   #scroll { flex: 1; overflow: auto; position: relative; background: #fff; }
   #tabella { position: relative; }
   .riga { display: grid; height: var(--row); position: absolute; left: 0; }
@@ -62,7 +80,7 @@
     header, .filtri, footer { padding-left: 16px; padding-right: 16px; }
     .filtri input[type=search] { width: 100%; }
     .filtri > * { min-width: 0; }
-    .filtri select { flex: 1 1 40%; width: 0; max-width: none; }
+    .filtri input#cercaCodice { width: 100%; }
   }
 </style>
 </head>
@@ -91,13 +109,20 @@
     <button class="btn grigio" id="esci">Esci</button>
   </header>
   <div class="filtri">
-    <input type="search" id="cerca" placeholder="Cerca codice, descrizione, ordine...">
-    <select id="fLista"></select>
-    <select id="fCliente"></select>
-    <select id="fCentro"></select>
-    <select id="fColore"></select>
-    <select id="fStato"></select>
+    <input type="search" id="cercaCodice" placeholder="Codice..." title="Cerca solo nel codice (anche il codice padre: si vede tutta la distinta). ? = una cifra qualsiasi, * = qualsiasi testo">
+    <input type="search" id="cerca" placeholder="Cerca in tutte le colonne...">
     <button class="btn grigio" id="togli">Togli filtri</button>
+    <span id="attivi">Clic sull'intestazione di una colonna per filtrare (anche più valori)</span>
+  </div>
+  <div id="popup">
+    <h2 id="popupTitolo"></h2>
+    <input type="search" id="popupCerca" placeholder="Cerca un valore...">
+    <div class="tutti"><a id="popupTutti">Seleziona tutti</a><a id="popupNessuno">Nessuno</a></div>
+    <div id="popupLista"></div>
+    <div class="azioni">
+      <button class="btn grigio" id="popupTogli">Togli filtro</button>
+      <button class="btn blu" id="popupOk">OK</button>
+    </div>
   </div>
   <div id="scroll">
     <div id="intestazione"></div>
@@ -155,7 +180,7 @@ function prepara() {
   colonne.forEach((c, i) => ix[c.n] = i);
   let padre = null;
   righe = dati.righe.map(r => {
-    const riga = { p: !!r.p, l: r.l, c: r.c || "", k: r.k || "", b: r.b || null, v: r.v };
+    const riga = { p: !!r.p, l: r.l, c: r.c || "", k: r.k || "", b: r.b || null, i: r.i || "", v: r.v };
     if (riga.p) padre = riga;
     riga.h = riga.p ? riga : padre;
     riga.testo = r.v.join(" ").toLowerCase();
@@ -169,57 +194,137 @@ function prepara() {
   const larg = px.map(w => w + "px").join(" ");
   const intest = $("intestazione");
   intest.style.gridTemplateColumns = larg;
-  intest.innerHTML = colonne.map(c => `<div>${esc(c.n)}</div>`).join("");
+  intest.innerHTML = colonne.map((c, i) => `<div data-c="${i}" title="Clic per filtrare">${esc(c.n)}</div>`).join("");
   $("tabella").dataset.colonne = larg;
   const tot = px.reduce((s, w) => s + w, 0);
   intest.style.width = $("tabella").style.width = tot + "px";
 
-  riempi("fLista", "Lista", r => r.h.v[ix["Lista"]], true);
-  riempi("fCliente", "Cliente", r => r.h.v[ix["Cliente"]]);
-  riempi("fCentro", "Centro", r => r.v[ix["Centro"]]);
-  riempi("fColore", "Colore", r => r.h.v[ix["Colore"]]);
-  riempi("fStato", "Stato", r => r.v[ix["Stato"]] || "(vuoto)");
+  // i filtri restano ricaricando (sono per nome di colonna); quelli di colonne che non ci sono più si tolgono
+  for (const n of Object.keys(filtri)) if (!(n in ix)) delete filtri[n];
   filtra(false);   // ricaricando (ogni 5 minuti) si resta dove si era
 }
 
-function riempi(id, nome, f, inverso) {
-  const sel = $(id), prima = sel.value;
-  const valori = [...new Set(righe.map(f).filter(v => v !== undefined && v !== ""))]
-    .sort((a, b) => a.localeCompare(b, "it", { numeric: true }));
-  if (inverso) valori.reverse();
-  sel.innerHTML = `<option value="">${nome}: tutti</option>` + valori.map(v => `<option>${esc(v)}</option>`).join("");
-  sel.value = valori.includes(prima) ? prima : "";
-  sel._f = f;
+// ===== Filtri per colonna, come nel programma: clic sull'intestazione, si spuntano uno o più valori
+const VUOTO = "(vuote)";
+let filtri = {};   // nome colonna → Set dei valori scelti
+const BOLLINI = { "#1E1E1E": "Nero - da mandare in verniciatura", "#F59614": "Arancione - partita in parte",
+  "#DC2828": "Rosso - partita tutta", "#28AA3C": "Verde - rientrata", "#00838F": "Verde mare - prodotto" };
+const ORDINE_BOLLINI = Object.values(BOLLINI);
+
+// Valore di una riga per il filtro: Stato = colore del bollino; Lista e Colore = quelli del codice padre (si vede la distinta intera)
+function valoreFiltro(r, c) {
+  const n = colonne[c].n;
+  if (n === "Stato") return r.b ? (BOLLINI[r.b.toUpperCase()] || r.b) : "Nessun bollino";
+  if (n === "Colore" || n === "Lista") return r.h.v[c] || VUOTO;
+  return r.v[c] || VUOTO;
 }
 
-// Cerca come nel programma: ? = una cifra/lettera qualsiasi, * = qualsiasi testo
-function cercatore(s) {
+// Valori da mostrare nel filtro di una colonna: quelli delle righe che passano gli ALTRI filtri (come in Excel)
+function valoriColonna(c) {
+  const altre = righeFiltrate(colonne[c].n);
+  const set = new Set(altre.map(r => valoreFiltro(r, c)));
+  for (const v of filtri[colonne[c].n] || []) set.add(v);
+  const n = colonne[c].n;
+  let v = [...set];
+  if (n === "Stato") v.sort((a, b) => (ORDINE_BOLLINI.indexOf(a) + 99) % 99 - (ORDINE_BOLLINI.indexOf(b) + 99) % 99);
+  else {
+    const data = s => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s); return m ? m[3] + m[2] + m[1] : null; };
+    v.sort((a, b) => a === VUOTO ? -1 : b === VUOTO ? 1
+      : data(a) && data(b) ? data(a).localeCompare(data(b)) : a.localeCompare(b, "it", { numeric: true }));
+    if (n === "Lista") v.reverse();
+  }
+  return v;
+}
+
+let popupCol = -1;
+function apriFiltro(c, el) {
+  popupCol = c;
+  const n = colonne[c].n, scelti = filtri[n];
+  $("popupTitolo").textContent = "Filtro: " + n;
+  $("popupCerca").value = "";
+  const lista = $("popupLista");
+  lista.innerHTML = valoriColonna(c).map(v => {
+    const dot = n === "Stato" ? Object.entries(BOLLINI).find(([, t]) => t === v)?.[0] : null;
+    return `<label><input type="checkbox" value="${esc(v)}" ${!scelti || scelti.has(v) ? "checked" : ""}>` +
+      `${dot ? `<span class="dot" style="background:${dot}"></span>` : ""}${esc(v)}</label>`;
+  }).join("");
+  const p = $("popup");
+  p.style.display = "flex";
+  const b = el.getBoundingClientRect();
+  p.style.left = Math.max(16, Math.min(b.left, window.innerWidth - p.offsetWidth - 16)) + "px";
+  p.style.top = Math.max(16, Math.min(b.bottom + 2, window.innerHeight - p.offsetHeight - 16)) + "px";
+  $("popupCerca").focus();
+}
+function chiudiFiltro() { $("popup").style.display = "none"; popupCol = -1; }
+function caselle(soloVisibili) {
+  return [...$("popupLista").querySelectorAll("label")].filter(l => !soloVisibili || l.style.display !== "none").map(l => l.firstChild);
+}
+$("popupCerca").oninput = () => {
+  const trova = cercatore($("popupCerca").value);
+  for (const l of $("popupLista").querySelectorAll("label")) l.style.display = !trova || trova(l.textContent.toLowerCase()) ? "" : "none";
+};
+$("popupTutti").onclick = () => caselle(true).forEach(x => x.checked = true);
+$("popupNessuno").onclick = () => caselle(true).forEach(x => x.checked = false);
+$("popupTogli").onclick = () => { delete filtri[colonne[popupCol].n]; chiudiFiltro(); filtra(); };
+$("popupOk").onclick = () => {
+  const n = colonne[popupCol].n, tutte = caselle(false);
+  // con una ricerca nel filtro valgono solo i valori trovati e spuntati
+  const scelte = ($("popupCerca").value.trim() ? caselle(true) : tutte).filter(x => x.checked).map(x => x.value);
+  if (scelte.length === tutte.length) delete filtri[n];
+  else filtri[n] = new Set(scelte);
+  chiudiFiltro();
+  filtra();
+};
+$("popupCerca").addEventListener("keydown", e => { if (e.key === "Enter") $("popupOk").click(); if (e.key === "Escape") chiudiFiltro(); });
+$("intestazione").addEventListener("click", e => {
+  const d = e.target.closest("[data-c]");
+  if (d) { e.stopPropagation(); popupCol === +d.dataset.c ? chiudiFiltro() : apriFiltro(+d.dataset.c, d); }
+});
+document.addEventListener("click", e => { if (popupCol >= 0 && !$("popup").contains(e.target)) chiudiFiltro(); });
+
+// Cerca come nel programma: ? = una cifra/lettera qualsiasi, * = qualsiasi testo.
+// intero: con ? e * deve corrispondere tutto il testo (es. codice 123*66 = inizia con 123 e finisce con 66)
+function cercatore(s, intero) {
   s = s.trim().toLowerCase();
   if (!s) return null;
   if (/[?*]/.test(s)) {
-    const re = new RegExp(s.split("").map(ch => ch === "?" ? "." : ch === "*" ? ".*" : ch.replace(/[.+^${}()|[\]\\]/g, "\\$&")).join(""));
+    const corpo = s.split("").map(ch => ch === "?" ? "." : ch === "*" ? ".*" : ch.replace(/[.+^${}()|[\]\\]/g, "\\$&")).join("");
+    const re = new RegExp(intero ? "^" + corpo + "$" : corpo);
     return t => re.test(t);
   }
   return t => t.includes(s);
 }
 
-function filtra(inCima = true) {
-  const sel = ["fLista", "fCliente", "fCentro", "fColore", "fStato"].map(id => $(id)).filter(s => s.value !== "");
-  ["fLista", "fCliente", "fCentro", "fColore", "fStato"].forEach(id => $(id).classList.toggle("attivo", $(id).value !== ""));
-  const trova = cercatore($("cerca").value);
-  $("cerca").classList.toggle("attivo", !!trova);
+// Righe che passano ricerche e filtri (escludi = nome di una colonna da non contare, per l'elenco dei valori del suo filtro)
+function righeFiltrate(escludi) {
+  const att = Object.entries(filtri).filter(([n]) => n !== escludi && n in ix).map(([n, s]) => [ix[n], s]);
+  const trova = cercatore($("cerca").value), codOk = cercatore($("cercaCodice").value, true);
   const iA = ix["Articolo"], iD = ix["Descrizione"];
-  visibili = righe.filter(r => {
-    for (const s of sel) if (String(s._f(r)) !== s.value) return false;
+  return righe.filter(r => {
+    for (const [c, s] of att) if (!s.has(valoreFiltro(r, c))) return false;
+    // Cercando il codice del padre si vede tutta la distinta
+    if (codOk && !codOk(r.v[iA].toLowerCase()) && !codOk(r.h.v[iA].toLowerCase())) return false;
     if (!trova) return true;
     // Cercando il codice o la descrizione del padre si vede tutta la distinta
     return trova(r.testo) || trova(r.h.v[iA].toLowerCase()) || trova(r.h.v[iD].toLowerCase());
   });
+}
+
+function filtra(inCima = true) {
+  const nomi = Object.keys(filtri).filter(n => n in ix);
+  const trova = $("cerca").value.trim() !== "", trovaCod = $("cercaCodice").value.trim() !== "";
+  $("cerca").classList.toggle("attivo", trova);
+  $("cercaCodice").classList.toggle("attivo", trovaCod);
+  visibili = righeFiltrate(null);
+  for (const d of $("intestazione").children) d.classList.toggle("filtrata", colonne[d.dataset.c].n in filtri);
+  $("attivi").innerHTML = nomi.length
+    ? "Filtri: " + nomi.map(n => `<b>${esc(n)}</b> = ${esc([...filtri[n]].slice(0, 4).join(", "))}${filtri[n].size > 4 ? ` e altri ${filtri[n].size - 4}` : ""}`).join("  ·  ")
+    : "Clic sull'intestazione di una colonna per filtrare (anche più valori)";
   const padri = new Set(visibili.map(r => r.h)).size;   // anche se il padre è filtrato via
+  filtroAttivo = nomi.length > 0 || trova || trovaCod;
   $("conta").textContent = `Distinte: ${padri.toLocaleString("it-IT")}  ·  righe: ${visibili.length.toLocaleString("it-IT")}` +
-    (sel.length || trova ? "  (filtro attivo)" : "");
+    (filtroAttivo ? "  (filtro attivo)" : "");
   $("vuoto").style.display = visibili.length ? "none" : "block";
-  filtroAttivo = sel.length > 0 || !!trova;
   if (!$("excel").disabled) $("excel").textContent = filtroAttivo ? "Scarica Excel (righe filtrate)" : "Scarica Excel";
   $("tabella").style.height = visibili.length * ROW + "px";
   if (inCima) $("scroll").scrollTop = 0;
@@ -241,7 +346,12 @@ function disegna() {
       const col = colonne[c];
       let v = r.v[c], cls = col.d ? "d" : "";
       if (!r.p && col.p && conPadre) v = "";
-      if (c === iS) { celle += `<div title="${esc(v)}">${r.b ? `<span class="dot" style="background:${r.b}"></span>` : ""}${esc(v)}</div>`; continue; }
+      if (c === iS) {
+        // sul codice padre: IMB = tutti i pezzi imballati (etichette colli), IMB n = imballati solo n pezzi
+        const imb = r.i ? `<span class="imb" style="color:${r.i === "IMB" ? "#1b5e20" : "#e65100"}">${esc(r.i)}</span>` : "";
+        celle += `<div title="${esc([r.i, v].filter(Boolean).join(" · "))}">${r.b ? `<span class="dot" style="background:${r.b}"></span>` : ""}${imb}${esc(v)}</div>`;
+        continue;
+      }
       if (c === iA) v = " ".repeat(r.l * 2) + v;   // codice rientrato per livello
       if (r.v[iC] === "M" && v !== "" && c === iP) cls += " cp";
       if (r.v[iC] === "M" && v !== "" && c === iR) cls += " cr";
@@ -265,7 +375,8 @@ async function scaricaExcel() {
     if (filtroAttivo && dati) {
       if (!visibili.length) { alert("Nessuna riga con questi filtri."); return; }
       blob = await excelFiltrato();
-      nome = `Verniciatura ${$("fLista").value || "filtrato"} ${giorno}.xlsx`;
+      const liste = filtri["Lista"];
+      nome = `Verniciatura ${liste && liste.size === 1 ? [...liste][0] : "filtrato"} ${giorno}.xlsx`;
     } else {
       blob = await scarica(FILE_EXCEL);
       nome = `Verniciatura ${giorno}.xlsx`;
@@ -349,8 +460,8 @@ $("formLogin").addEventListener("submit", async e => {
 $("esci").onclick = esci;
 $("aggiorna").onclick = carica;
 $("excel").onclick = scaricaExcel;
-$("togli").onclick = () => { ["fLista", "fCliente", "fCentro", "fColore", "fStato"].forEach(id => $(id).value = ""); $("cerca").value = ""; filtra(); };
-["fLista", "fCliente", "fCentro", "fColore", "fStato"].forEach(id => $(id).onchange = filtra);
+$("togli").onclick = () => { filtri = {}; $("cerca").value = ""; $("cercaCodice").value = ""; filtra(); };
+$("cercaCodice").oninput = () => { clearTimeout(tCerca); tCerca = setTimeout(filtra, 250); };
 let tCerca;
 $("cerca").oninput = () => { clearTimeout(tCerca); tCerca = setTimeout(filtra, 250); };
 $("scroll").addEventListener("scroll", () => requestAnimationFrame(disegna), { passive: true });
