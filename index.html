@@ -60,6 +60,7 @@
   #popupLista { overflow: auto; flex: 1; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px 0; }
   #popupLista label { display: flex; align-items: center; gap: 7px; padding: 3px 12px; cursor: pointer; white-space: nowrap; }
   #popupLista label:hover { background: #f1f4f6; }
+  #popupLista .gruppo { margin: 6px 12px 2px; padding-top: 6px; border-top: 1px solid var(--line); font-weight: 700; color: var(--muted); }
   #popup .azioni { display: flex; gap: 8px; justify-content: flex-end; padding: 8px 12px; }
   .imb { font-weight: 700; margin-right: 5px; }
   #scroll { flex: 1; overflow: auto; position: relative; background: #fff; }
@@ -200,7 +201,7 @@ function prepara() {
   intest.style.width = $("tabella").style.width = tot + "px";
 
   // i filtri restano ricaricando (sono per nome di colonna); quelli di colonne che non ci sono più si tolgono
-  for (const n of Object.keys(filtri)) if (!(n in ix)) delete filtri[n];
+  for (const n of Object.keys(filtri)) if (!(n in ix) && n !== IMB_KEY) delete filtri[n];
   filtra(false);   // ricaricando (ogni 5 minuti) si resta dove si era
 }
 
@@ -210,6 +211,11 @@ let filtri = {};   // nome colonna → Set dei valori scelti
 const BOLLINI = { "#1E1E1E": "Nero - da mandare in verniciatura", "#F59614": "Arancione - partita in parte",
   "#DC2828": "Rosso - partita tutta", "#28AA3C": "Verde - rientrata", "#00838F": "Verde mare - prodotto" };
 const ORDINE_BOLLINI = Object.values(BOLLINI);
+// Nel filtro Stato, sotto i bollini, l'imballo del codice padre (etichette colli): vale per tutte le righe della distinta,
+// così filtrando bollino verde + "IMB - imballato tutto" si vedono le distinte rientrate e già imballate
+const IMB_KEY = "Imballo";
+const IMB_VALORI = ["Non imballato", "IMB n - imballato in parte", "IMB - imballato tutto"];
+function valoreImb(r) { return !r.h.i ? IMB_VALORI[0] : r.h.i === "IMB" ? IMB_VALORI[2] : IMB_VALORI[1]; }
 
 // Valore di una riga per il filtro: Stato = colore del bollino; Lista e Colore = quelli del codice padre (si vede la distinta intera)
 function valoreFiltro(r, c) {
@@ -243,11 +249,17 @@ function apriFiltro(c, el) {
   $("popupTitolo").textContent = "Filtro: " + n;
   $("popupCerca").value = "";
   const lista = $("popupLista");
-  lista.innerHTML = valoriColonna(c).map(v => {
-    const dot = n === "Stato" ? Object.entries(BOLLINI).find(([, t]) => t === v)?.[0] : null;
-    return `<label><input type="checkbox" value="${esc(v)}" ${!scelti || scelti.has(v) ? "checked" : ""}>` +
-      `${dot ? `<span class="dot" style="background:${dot}"></span>` : ""}${esc(v)}</label>`;
-  }).join("");
+  const casella = (v, sel, gruppo, dot) => `<label><input type="checkbox" data-g="${gruppo}" value="${esc(v)}" ${!sel || sel.has(v) ? "checked" : ""}>` +
+    `${dot ? `<span class="dot" style="background:${dot}"></span>` : ""}${esc(v)}</label>`;
+  lista.innerHTML = valoriColonna(c).map(v =>
+    casella(v, scelti, "", n === "Stato" ? Object.entries(BOLLINI).find(([, t]) => t === v)?.[0] : null)).join("");
+  if (n === "Stato") {
+    // secondo gruppo: imballo del codice padre (valori presenti nelle righe che passano gli altri filtri)
+    const presenti = new Set(righeFiltrate("Stato").map(valoreImb));
+    for (const v of filtri[IMB_KEY] || []) presenti.add(v);
+    lista.innerHTML += `<div class="gruppo">Imballo (etichette colli)</div>` +
+      IMB_VALORI.filter(v => presenti.has(v)).map(v => casella(v, filtri[IMB_KEY], "imb", null)).join("");
+  }
   const p = $("popup");
   p.style.display = "flex";
   const b = el.getBoundingClientRect();
@@ -265,13 +277,23 @@ $("popupCerca").oninput = () => {
 };
 $("popupTutti").onclick = () => caselle(true).forEach(x => x.checked = true);
 $("popupNessuno").onclick = () => caselle(true).forEach(x => x.checked = false);
-$("popupTogli").onclick = () => { delete filtri[colonne[popupCol].n]; chiudiFiltro(); filtra(); };
+$("popupTogli").onclick = () => {
+  const n = colonne[popupCol].n;
+  delete filtri[n];
+  if (n === "Stato") delete filtri[IMB_KEY];
+  chiudiFiltro(); filtra();
+};
 $("popupOk").onclick = () => {
-  const n = colonne[popupCol].n, tutte = caselle(false);
+  const n = colonne[popupCol].n;
   // con una ricerca nel filtro valgono solo i valori trovati e spuntati
-  const scelte = ($("popupCerca").value.trim() ? caselle(true) : tutte).filter(x => x.checked).map(x => x.value);
-  if (scelte.length === tutte.length) delete filtri[n];
-  else filtri[n] = new Set(scelte);
+  const cerca = $("popupCerca").value.trim() !== "";
+  for (const [gruppo, chiave] of [["", n], ["imb", IMB_KEY]]) {
+    const tutte = caselle(false).filter(x => x.dataset.g === gruppo);
+    if (!tutte.length) continue;
+    const scelte = (cerca ? caselle(true).filter(x => x.dataset.g === gruppo) : tutte).filter(x => x.checked).map(x => x.value);
+    if (scelte.length === tutte.length) delete filtri[chiave];
+    else filtri[chiave] = new Set(scelte);
+  }
   chiudiFiltro();
   filtra();
 };
@@ -298,10 +320,12 @@ function cercatore(s, intero) {
 // Righe che passano ricerche e filtri (escludi = nome di una colonna da non contare, per l'elenco dei valori del suo filtro)
 function righeFiltrate(escludi) {
   const att = Object.entries(filtri).filter(([n]) => n !== escludi && n in ix).map(([n, s]) => [ix[n], s]);
+  const imb = escludi === "Stato" ? null : filtri[IMB_KEY];   // imballo: sta nel filtro della colonna Stato
   const trova = cercatore($("cerca").value), codOk = cercatore($("cercaCodice").value, true);
   const iA = ix["Articolo"], iD = ix["Descrizione"];
   return righe.filter(r => {
     for (const [c, s] of att) if (!s.has(valoreFiltro(r, c))) return false;
+    if (imb && !imb.has(valoreImb(r))) return false;
     // Cercando il codice del padre si vede tutta la distinta
     if (codOk && !codOk(r.v[iA].toLowerCase()) && !codOk(r.h.v[iA].toLowerCase())) return false;
     if (!trova) return true;
@@ -311,12 +335,12 @@ function righeFiltrate(escludi) {
 }
 
 function filtra(inCima = true) {
-  const nomi = Object.keys(filtri).filter(n => n in ix);
+  const nomi = Object.keys(filtri).filter(n => n in ix || n === IMB_KEY);
   const trova = $("cerca").value.trim() !== "", trovaCod = $("cercaCodice").value.trim() !== "";
   $("cerca").classList.toggle("attivo", trova);
   $("cercaCodice").classList.toggle("attivo", trovaCod);
   visibili = righeFiltrate(null);
-  for (const d of $("intestazione").children) d.classList.toggle("filtrata", colonne[d.dataset.c].n in filtri);
+  for (const d of $("intestazione").children) d.classList.toggle("filtrata", colonne[d.dataset.c].n in filtri || (colonne[d.dataset.c].n === "Stato" && IMB_KEY in filtri));
   $("attivi").innerHTML = nomi.length
     ? "Filtri: " + nomi.map(n => `<b>${esc(n)}</b> = ${esc([...filtri[n]].slice(0, 4).join(", "))}${filtri[n].size > 4 ? ` e altri ${filtri[n].size - 4}` : ""}`).join("  ·  ")
     : "Clic sull'intestazione di una colonna per filtrare (anche più valori)";
