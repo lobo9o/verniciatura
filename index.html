@@ -77,11 +77,49 @@
   .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
   footer { background: var(--card); border-top: 1px solid var(--line); padding: 6px 16px; font-weight: 700; display: flex; flex-wrap: wrap; gap: 4px 18px; }
   #vuoto { padding: 40px 16px; color: var(--muted); text-align: center; display: none; }
+  #vista { display: none; }
+
+  /* Smartphone: una scheda per riga (si legge tutta senza spostarsi di lato), tocco = tutti i dati della riga */
+  #app.schede #tabella { width: 100% !important; }
+  #app.schede #intestazione { display: flex; width: auto !important; height: auto; gap: 6px; padding: 6px 8px; overflow-x: auto;
+    background: var(--card); border-bottom: 1px solid var(--line); align-items: center; }
+  #app.schede #intestazione::before { content: "Filtra:"; font-weight: 700; color: var(--muted); flex: none; }
+  #app.schede #intestazione > div { flex: none; border: 0; border-radius: 14px; line-height: 26px; padding: 0 10px; font-size: 12px; }
+  .scheda { position: absolute; left: 0; right: 0; padding: 5px 10px; border-bottom: 1px solid #d5dbe0; overflow: hidden; background: #fff; cursor: pointer; }
+  .scheda > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 19px; }
+  .scheda .l1 { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  .scheda .cod { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .scheda .q { flex: none; font-weight: 700; }
+  .scheda .l3 { font-size: 12px; color: var(--muted); }
+  .scheda .l3 b { color: var(--ink); font-weight: 600; }
+  .scheda.p { background: var(--padre); border-top: 2px solid #6f9bd6; }
+  .scheda.p .l1 { font-size: 15px; font-weight: 700; }
+  .scheda.p .l3 { color: #263238; }
+  .scheda.mr { background: var(--mr); } .scheda.mp { background: var(--mp); } .scheda.mv { background: var(--mv); }
+  .scheda .dot { margin-right: 0; flex: none; }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-weight: 700; color: #fff; line-height: 17px; }
+  .tag.cp { background: var(--rosso); } .tag.cr { background: var(--verde); }
+  #dettaglio { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.4); display: none; align-items: flex-end; justify-content: center; }
+  #dettaglio .foglio { background: var(--card); width: 100%; max-width: 520px; max-height: 85vh; overflow: auto; border-radius: 14px 14px 0 0; padding: 14px 16px 16px; }
+  #dettaglio h2 { font-size: 16px; margin: 0 0 2px; }
+  #dettaglio .sotto { color: var(--muted); margin-bottom: 10px; }
+  #dettaglio dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 0 0 14px; }
+  #dettaglio dt { color: var(--muted); font-weight: 600; }
+  #dettaglio dd { margin: 0; word-break: break-word; }
+  #dettaglio .btn { width: 100%; padding: 10px; }
+
+  @media (max-width: 900px) { #vista { display: inline-block; } }
   @media (max-width: 640px) {
     header, .filtri, footer { padding-left: 16px; padding-right: 16px; }
-    .filtri input[type=search] { width: 100%; }
     .filtri > * { min-width: 0; }
-    .filtri input#cercaCodice { width: 100%; }
+    /* telefono: le due ricerche e Togli filtri su una riga, meno spazio sopra le schede */
+    header { padding-top: 6px; padding-bottom: 6px; }
+    header .btn { padding: 6px 10px; }
+    .filtri input[type=search] { width: auto; flex: 1 1 0; }
+    .filtri input#cercaCodice { width: auto; flex: 0 1 34%; }
+    #togli { padding: 6px 10px; }
+    #attivi:empty { display: none; }
+    #attivi { width: 100%; }
   }
 </style>
 </head>
@@ -105,6 +143,7 @@
     <h1>Verniciatura</h1>
     <span id="agg"></span>
     <span class="spazio"></span>
+    <button class="btn grigio" id="vista" title="Passa dalle schede (smartphone) alla tabella come sul PC e viceversa">Tabella</button>
     <button class="btn verde" id="excel">Scarica Excel</button>
     <button class="btn blu" id="aggiorna">Aggiorna</button>
     <button class="btn grigio" id="esci">Esci</button>
@@ -131,6 +170,12 @@
     <div id="vuoto">Nessuna riga con questi filtri.</div>
   </div>
   <footer><span id="conta"></span></footer>
+  <div id="dettaglio"><div class="foglio">
+    <h2 id="detTitolo"></h2>
+    <div class="sotto" id="detSotto"></div>
+    <dl id="detDati"></dl>
+    <button class="btn blu" id="detChiudi">Chiudi</button>
+  </div></div>
 </div>
 
 <script>
@@ -191,7 +236,8 @@ function prepara() {
   $("agg").textContent = "Aggiornato il " + d.toLocaleDateString("it-IT") + " alle " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
   // Larghezze come nel programma, un po' più larghe (il codice anche per il rientro dei livelli)
-  const px = colonne.map((c, i) => Math.round(Math.max(c.w * 1.3, 46) + (i === ix["Articolo"] ? 40 : 0)));
+  // Stato: solo bollino e IMB, basta una colonna stretta
+  const px = colonne.map((c, i) => i === ix["Stato"] ? 78 : Math.round(Math.max(c.w * 1.3, 46) + (i === ix["Articolo"] ? 40 : 0)));
   const larg = px.map(w => w + "px").join(" ");
   const intest = $("intestazione");
   intest.style.gridTemplateColumns = larg;
@@ -343,22 +389,114 @@ function filtra(inCima = true) {
   for (const d of $("intestazione").children) d.classList.toggle("filtrata", colonne[d.dataset.c].n in filtri || (colonne[d.dataset.c].n === "Stato" && IMB_KEY in filtri));
   $("attivi").innerHTML = nomi.length
     ? "Filtri: " + nomi.map(n => `<b>${esc(n)}</b> = ${esc([...filtri[n]].slice(0, 4).join(", "))}${filtri[n].size > 4 ? ` e altri ${filtri[n].size - 4}` : ""}`).join("  ·  ")
-    : "Clic sull'intestazione di una colonna per filtrare (anche più valori)";
+    : schede ? "" : "Clic sull'intestazione di una colonna per filtrare (anche più valori)";
   const padri = new Set(visibili.map(r => r.h)).size;   // anche se il padre è filtrato via
   filtroAttivo = nomi.length > 0 || trova || trovaCod;
   $("conta").textContent = `Distinte: ${padri.toLocaleString("it-IT")}  ·  righe: ${visibili.length.toLocaleString("it-IT")}` +
     (filtroAttivo ? "  (filtro attivo)" : "");
   $("vuoto").style.display = visibili.length ? "none" : "block";
   if (!$("excel").disabled) $("excel").textContent = filtroAttivo ? "Scarica Excel (righe filtrate)" : "Scarica Excel";
-  $("tabella").style.height = visibili.length * ROW + "px";
+  posizioni();
   if (inCima) $("scroll").scrollTop = 0;
   disegna();
 }
 
+// ===== Vista: tabella come sul PC, o schede sullo smartphone (si sceglie da sola dalla larghezza, il pulsante Tabella/Schede la cambia)
+const SCHEDA_PADRE = 70, SCHEDA_FIGLIO = 66;
+// Sotto i 700 px schede, sopra i 900 px sempre la tabella; in mezzo (o cambiandola col pulsante) vale la scelta, ricordata sul telefono
+const strettoMq = window.matchMedia("(max-width: 700px)"), medioMq = window.matchMedia("(max-width: 900px)");
+let schede = false, pos = [0], sceltaVista = null;
+try { sceltaVista = localStorage.getItem("vista"); } catch { }
+function aggiornaVista() {
+  const nuova = !medioMq.matches ? false : sceltaVista ? sceltaVista === "schede" : strettoMq.matches;
+  const cambiata = nuova !== schede;
+  schede = nuova;
+  $("app").classList.toggle("schede", schede);
+  $("vista").textContent = schede ? "Tabella" : "Schede";
+  if (cambiata && dati) filtra();
+}
+$("vista").onclick = () => {
+  sceltaVista = schede ? "tabella" : "schede";
+  try { localStorage.setItem("vista", sceltaVista); } catch { }
+  aggiornaVista();
+};
+strettoMq.addEventListener("change", aggiornaVista);
+medioMq.addEventListener("change", aggiornaVista);
+aggiornaVista();
+
+// Inizio di ogni riga (le schede del padre sono più alte)
+function posizioni() {
+  pos = new Array(visibili.length + 1);
+  pos[0] = 0;
+  for (let n = 0; n < visibili.length; n++) pos[n + 1] = pos[n] + (!schede ? ROW : visibili[n].p ? SCHEDA_PADRE : SCHEDA_FIGLIO);
+  $("tabella").style.height = pos[visibili.length] + "px";
+}
+function primaRiga(y) {   // prima riga che si vede a quell'altezza
+  let lo = 0, hi = visibili.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (pos[m + 1] <= y) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+function valore(r, nome) { return nome in ix ? r.v[ix[nome]] || "" : ""; }
+function bollinoHtml(r) { return r.b ? `<span class="dot" style="background:${r.b}"></span>` : ""; }
+// Sul codice padre: IMB = tutti i pezzi imballati (etichette colli), verde; IMB n = imballati solo n pezzi, arancione
+function imbHtml(r) { return r.i ? `<span class="imb" style="color:${r.i === "IMB" ? "#1b5e20" : "#e65100"}">${esc(r.i)}</span>` : ""; }
+function titoloStato(r) { return [r.b ? BOLLINI[r.b.toUpperCase()] || "" : "", r.i].filter(Boolean).join(" · "); }
+
+function scheda(r, n) {
+  const q = valore(r, "Q.tà");
+  const l1 = `<div class="l1">${bollinoHtml(r)}${imbHtml(r)}<span class="cod">${esc(valore(r, "Articolo"))}</span>${q ? `<span class="q">Q.tà ${esc(q)}</span>` : ""}</div>`;
+  const l2 = `<div class="l2">${esc(valore(r, "Descrizione"))}</div>`;
+  const campo = (et, nome) => { const v = valore(r, nome); return v ? `${et} <b>${esc(v)}</b>` : ""; };
+  let l3;
+  if (r.p) l3 = [esc(valore(r, "Ordine")), esc(valore(r, "Cliente")), campo("Cons.", "Consegna"), campo("Lista", "Lista"), campo("Col.", "Colore")];
+  else {
+    const part = valore(r, "Partiti"), rien = valore(r, "Rientrati"), m = valore(r, "Centro") === "M";
+    l3 = [campo("Centro", "Centro"), campo("Dest.", "Dest."),
+      part ? (m ? `<span class="tag cp">Part. ${esc(part)}</span>` : campo("Part.", "Partiti")) : "",
+      rien ? (m ? `<span class="tag cr">Rientr. ${esc(rien)}</span>` : campo("Rientr.", "Rientrati")) : "",
+      campo("Imb.", "Imballati"), esc(valore(r, "Verniciatore")), campo("Bolla", "Bolla part."), campo("Rientro", "Bolla rientro")];
+  }
+  const rientro = r.p ? 10 : 10 + Math.min(r.l, 5) * 10;   // livelli rientrati come il codice nella tabella
+  return `<div class="scheda ${r.p ? "p" : r.k}" data-n="${n}" title="${esc(titoloStato(r))}" style="top:${pos[n]}px;height:${pos[n + 1] - pos[n]}px;padding-left:${rientro}px">` +
+    `${l1}${l2}<div class="l3">${l3.filter(Boolean).join("  ·  ") || "&nbsp;"}</div></div>`;
+}
+
+// Tocco su una scheda: tutti i dati della riga
+function apriDettaglio(r) {
+  $("detTitolo").innerHTML = bollinoHtml(r) + imbHtml(r) + esc(valore(r, "Articolo"));
+  $("detSotto").textContent = valore(r, "Descrizione");
+  const righeDl = [];
+  if (!r.p) righeDl.push(["Distinta", r.h.v[ix["Articolo"]] + " · " + valore(r.h, "Ordine") + " · " + valore(r.h, "Cliente")]);
+  if (titoloStato(r)) righeDl.push(["Stato", titoloStato(r)]);
+  colonne.forEach((c, i) => {
+    if (c.n === "Stato" || c.n === "Articolo" || c.n === "Descrizione") return;
+    const v = r.v[i] || (c.p && !r.p ? r.h.v[i] : "");
+    if (v) righeDl.push([c.n, v]);
+  });
+  $("detDati").innerHTML = righeDl.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  $("dettaglio").style.display = "flex";
+}
+function chiudiDettaglio() { $("dettaglio").style.display = "none"; }
+$("detChiudi").onclick = chiudiDettaglio;
+$("dettaglio").addEventListener("click", e => { if (e.target === $("dettaglio")) chiudiDettaglio(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") chiudiDettaglio(); });
+$("tabella").addEventListener("click", e => {
+  if (!schede || popupCol >= 0) return;   // con il filtro aperto il tocco lo chiude soltanto
+  const s = e.target.closest(".scheda");
+  if (s) apriDettaglio(visibili[+s.dataset.n]);
+});
+
 function disegna() {
   const sc = $("scroll"), tab = $("tabella");
-  const da = Math.max(0, Math.floor(sc.scrollTop / ROW) - 10);
-  const a = Math.min(visibili.length, da + Math.ceil(sc.clientHeight / ROW) + 20);
+  const da = Math.max(0, primaRiga(sc.scrollTop) - 10);
+  const a = Math.min(visibili.length, primaRiga(sc.scrollTop + sc.clientHeight) + 20);
+  if (schede) {
+    let html = "";
+    for (let n = da; n < a; n++) html += scheda(visibili[n], n);
+    tab.innerHTML = html;
+    return;
+  }
   const iS = ix["Stato"], iA = ix["Articolo"], iP = ix["Partiti"], iR = ix["Rientrati"], iC = ix["Centro"];
   let html = "";
   for (let n = da; n < a; n++) {
@@ -371,9 +509,8 @@ function disegna() {
       let v = r.v[c], cls = col.d ? "d" : "";
       if (!r.p && col.p && conPadre) v = "";
       if (c === iS) {
-        // sul codice padre: IMB = tutti i pezzi imballati (etichette colli), IMB n = imballati solo n pezzi
-        const imb = r.i ? `<span class="imb" style="color:${r.i === "IMB" ? "#1b5e20" : "#e65100"}">${esc(r.i)}</span>` : "";
-        celle += `<div title="${esc([r.i, v].filter(Boolean).join(" · "))}">${r.b ? `<span class="dot" style="background:${r.b}"></span>` : ""}${imb}${esc(v)}</div>`;
+        // come nel programma: solo il bollino (e IMB sul padre), senza scritte
+        celle += `<div title="${esc(titoloStato(r))}">${bollinoHtml(r)}${imbHtml(r)}</div>`;
         continue;
       }
       if (c === iA) v = " ".repeat(r.l * 2) + v;   // codice rientrato per livello
