@@ -74,6 +74,10 @@
   .mr > div { background: var(--mr); } .mp > div { background: var(--mp); } .mv > div { background: var(--mv); }
   .riga > div.cp { background: var(--rosso); color: #fff; font-weight: 700; }
   .riga > div.cr { background: var(--verde); color: #fff; font-weight: 700; }
+  /* codice cercato col "Codice...": evidenziato in giallo (si vede in quale punto della distinta è agganciato) */
+  .riga > div.trovato, .scheda .cod.trovato { background: #ffe282; color: var(--ink); font-weight: 700; }
+  .scheda .cod.trovato { flex: 0 1 auto; padding: 0 4px; border-radius: 3px; }
+  .scheda .l1 .q { margin-left: auto; }
   .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
   footer { background: var(--card); border-top: 1px solid var(--line); padding: 6px 16px; font-weight: 700; display: flex; flex-wrap: wrap; gap: 4px 18px; }
   #vuoto { padding: 40px 16px; color: var(--muted); text-align: center; display: none; }
@@ -149,7 +153,7 @@
     <button class="btn grigio" id="esci">Esci</button>
   </header>
   <div class="filtri">
-    <input type="search" id="cercaCodice" placeholder="Codice..." title="Cerca solo nel codice (anche il codice padre: si vede tutta la distinta). ? = una cifra qualsiasi, * = qualsiasi testo">
+    <input type="search" id="cercaCodice" placeholder="Codice..." title="Cerca un codice di qualsiasi livello (SA, M, IM...): escono le distinte complete in cui è agganciato, il codice è in giallo. Con i filtri delle colonne (es. Centro = IM e M) si vedono solo quelle righe. ? = una cifra qualsiasi, * = qualsiasi testo">
     <input type="search" id="cerca" placeholder="Cerca in tutte le colonne...">
     <button class="btn grigio" id="togli">Togli filtri</button>
     <span id="attivi">Clic sull'intestazione di una colonna per filtrare (anche più valori)</span>
@@ -190,6 +194,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = id => document.getElementById(id);
 const ROW = 26;
 let dati = null, righe = [], visibili = [], colonne = [], ix = {}, filtroAttivo = false;
+let trovati = new Set();   // righe il cui codice corrisponde al "Codice..." (evidenziate in giallo)
 
 function email(u) { u = u.trim(); return u.includes("@") ? u : u.toLowerCase() + "@" + DOMINIO; }
 
@@ -369,11 +374,18 @@ function righeFiltrate(escludi) {
   const imb = escludi === "Stato" ? null : filtri[IMB_KEY];   // imballo: sta nel filtro della colonna Stato
   const trova = cercatore($("cerca").value), codOk = cercatore($("cercaCodice").value, true);
   const iA = ix["Articolo"], iD = ix["Descrizione"];
+  // Codice di qualsiasi livello: si tengono le distinte COMPLETE in cui c'è (cercato su tutte le righe, anche quelle
+  // nascoste dai filtri), poi i filtri delle colonne scelgono quali righe vedere (es. Centro IM e M: i verniciati di quel SA)
+  let distinte = null;
+  trovati = new Set();
+  if (codOk) {
+    distinte = new Set();
+    for (const r of righe) if (codOk(r.v[iA].toLowerCase())) { distinte.add(r.h); trovati.add(r); }
+  }
   return righe.filter(r => {
+    if (distinte && !distinte.has(r.h)) return false;
     for (const [c, s] of att) if (!s.has(valoreFiltro(r, c))) return false;
     if (imb && !imb.has(valoreImb(r))) return false;
-    // Cercando il codice del padre si vede tutta la distinta
-    if (codOk && !codOk(r.v[iA].toLowerCase()) && !codOk(r.h.v[iA].toLowerCase())) return false;
     if (!trova) return true;
     // Cercando il codice o la descrizione del padre si vede tutta la distinta
     return trova(r.testo) || trova(r.h.v[iA].toLowerCase()) || trova(r.h.v[iD].toLowerCase());
@@ -445,7 +457,7 @@ function titoloStato(r) { return [r.b ? BOLLINI[r.b.toUpperCase()] || "" : "", r
 
 function scheda(r, n) {
   const q = valore(r, "Q.tà");
-  const l1 = `<div class="l1">${bollinoHtml(r)}${imbHtml(r)}<span class="cod">${esc(valore(r, "Articolo"))}</span>${q ? `<span class="q">Q.tà ${esc(q)}</span>` : ""}</div>`;
+  const l1 = `<div class="l1">${bollinoHtml(r)}${imbHtml(r)}<span class="cod${trovati.has(r) ? " trovato" : ""}">${esc(valore(r, "Articolo"))}</span>${q ? `<span class="q">Q.tà ${esc(q)}</span>` : ""}</div>`;
   const l2 = `<div class="l2">${esc(valore(r, "Descrizione"))}</div>`;
   const campo = (et, nome) => { const v = valore(r, nome); return v ? `${et} <b>${esc(v)}</b>` : ""; };
   let l3;
@@ -514,6 +526,7 @@ function disegna() {
         continue;
       }
       if (c === iA) v = " ".repeat(r.l * 2) + v;   // codice rientrato per livello
+      if (c === iA && trovati.has(r)) cls += " trovato";
       if (r.v[iC] === "M" && v !== "" && c === iP) cls += " cp";
       if (r.v[iC] === "M" && v !== "" && c === iR) cls += " cr";
       celle += `<div class="${cls}" title="${esc(r.v[c])}">${esc(v)}</div>`;
